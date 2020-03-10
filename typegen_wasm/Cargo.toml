@@ -1,0 +1,25 @@
+[package]
+name = "typegen_wasm"
+version = "0.1.0"
+authors = ["Erik Vesteraas <erik@vestera.as>"]
+edition = "2018"
+description = ""
+repository = ""
+license = ""
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+typegen_core = { path = "../typegen_core" }
+
+wasm-bindgen = "0.2.58"
+
+wee_alloc = { version = "0.4.5", optional = true }
+console_error_panic_hook = { version = "0.1.6", optional = true }
+console_log = { version = "0.1.2", optional = true }
+log = { version = "0.4.8", optional = true }
+
+[features]
+debug = ["wee_alloc", "console_error_panic_hook", "console_log", "log"]
+default = ["wee_alloc"]

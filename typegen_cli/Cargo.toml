@@ -1,0 +1,8 @@
+[package]
+name = "typegen_cli"
+version = "0.1.0"
+authors = ["Erik Vesteraas <erik@vestera.as>"]
+edition = "2018"
+
+[dependencies]
+typegen_core = { path = "../typegen_core" }

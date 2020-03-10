@@ -1,0 +1,8 @@
+[package]
+name = "typegen_core"
+version = "0.1.0"
+authors = ["Erik Vesteraas <erik@vestera.as>"]
+edition = "2018"
+
+[dependencies]
+log = "0.4.8"

@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "typegen_cli",
+    "typegen_core",
+    "typegen_wasm"
+]
