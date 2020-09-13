@@ -1,11 +1,13 @@
 use crate::jsoninputerr::JsonInputErr;
 use crate::jsonlex::{JsonLexer, JsonToken};
-use crate::shape::{Shape, common_shape};
+use crate::shape::{common_shape, Shape};
 use std::io::Read;
 use std::iter::Peekable;
 
 pub trait FromJson {
-    fn from_json(json: impl Read) -> Result<Self, JsonInputErr> where Self: Sized;
+    fn from_json(json: impl Read) -> Result<Self, JsonInputErr>
+    where
+        Self: Sized;
 }
 
 impl FromJson for Shape {
@@ -25,14 +27,16 @@ impl<R: Read> Inference<R> {
         }
     }
 
-    fn infer_value(&mut self) -> Result<Shape, JsonInputErr> {
-        let token = match self.tokens.next() {
-            Some(Ok(token)) => token,
-            Some(Err(err)) => return Err(err),
-            None => return Err(JsonInputErr::UnexpectedEndOfInput),
-        };
+    fn next_token(&mut self) -> Result<JsonToken, JsonInputErr> {
+        match self.tokens.next() {
+            Some(Ok(token)) => Ok(token),
+            Some(Err(err)) => Err(err),
+            None => Err(JsonInputErr::UnexpectedEndOfInput),
+        }
+    }
 
-        match token {
+    fn infer_value(&mut self) -> Result<Shape, JsonInputErr> {
+        match self.next_token()? {
             JsonToken::True | JsonToken::False => Ok(Shape::Bool),
             JsonToken::Null => Ok(Shape::Optional(Box::new(Shape::Bottom))),
             JsonToken::Number(s) => {
@@ -59,15 +63,11 @@ impl<R: Read> Inference<R> {
 
         let mut fields = Vec::new();
         loop {
-            let token = match self.tokens.next() {
-                Some(Ok(token)) => token,
-                Some(Err(err)) => return Err(err),
-                None => return Err(JsonInputErr::UnexpectedEndOfInput),
-            };
+            let token = self.next_token()?;
 
             let key = match token {
                 JsonToken::String(s) => s,
-                _ => return Err(JsonInputErr::InvalidJson)
+                _ => return Err(JsonInputErr::InvalidJson),
             };
 
             self.expect_token(JsonToken::Colon)?;
@@ -85,13 +85,7 @@ impl<R: Read> Inference<R> {
     }
 
     fn expect_token(&mut self, expected_token: JsonToken) -> Result<(), JsonInputErr> {
-        let token = match self.tokens.next() {
-            None => return Err(JsonInputErr::UnexpectedEndOfInput),
-            Some(Ok(token)) => token,
-            Some(Err(err)) => return Err(err),
-        };
-
-        if token == expected_token {
+        if self.next_token()? == expected_token {
             Ok(())
         } else {
             Err(JsonInputErr::InvalidJson)
@@ -131,18 +125,22 @@ mod tests {
             Ok(Shape::Record(vec![]))
         );
         assert_eq!(
-            Shape::from_json(r#"{
+            Shape::from_json(
+                r#"{
                 "foo": true
-            }"#.as_bytes()),
-            Ok(Shape::Record(vec![
-                ("foo".to_string(), Shape::Bool)
-            ]))
+            }"#
+                .as_bytes()
+            ),
+            Ok(Shape::Record(vec![("foo".to_string(), Shape::Bool)]))
         );
         assert_eq!(
-            Shape::from_json(r#"{
+            Shape::from_json(
+                r#"{
                 "foo": true,
                 "bar": false
-            }"#.as_bytes()),
+            }"#
+                .as_bytes()
+            ),
             Ok(Shape::Record(vec![
                 ("foo".to_string(), Shape::Bool),
                 ("bar".to_string(), Shape::Bool)
@@ -150,22 +148,31 @@ mod tests {
         );
 
         assert_eq!(
-            Shape::from_json(r#"{
+            Shape::from_json(
+                r#"{
                 "foo": true
                 "bar": false
-            }"#.as_bytes()),
+            }"#
+                .as_bytes()
+            ),
             Err(JsonInputErr::InvalidJson)
         );
         assert_eq!(
-            Shape::from_json(r#"{
+            Shape::from_json(
+                r#"{
                 "foo": true,
-            }"#.as_bytes()),
+            }"#
+                .as_bytes()
+            ),
             Err(JsonInputErr::InvalidJson)
         );
         assert_eq!(
-            Shape::from_json(r#"{
+            Shape::from_json(
+                r#"{
                 "foo": true,
-            "#.as_bytes()),
+            "#
+                .as_bytes()
+            ),
             Err(JsonInputErr::UnexpectedEndOfInput)
         );
     }
