@@ -1,4 +1,5 @@
 use crate::jsoninputerr::JsonInputErr;
+use std::char::decode_utf16;
 use std::io::{BufReader, Bytes, Read};
 use std::iter::Peekable;
 
@@ -100,35 +101,62 @@ impl<R: Read> JsonLexer<R> {
 
             if byte == b'"' {
                 return Ok(JsonToken::String(
-                    String::from_utf8(buffer).map_err(|_err| JsonInputErr::InvalidUtf8)?,
+                    String::from_utf8(buffer).map_err(|_| JsonInputErr::InvalidUtf8)?,
                 ));
             } else if byte == b'\\' {
                 let escaped = self.expect_byte()?;
 
-                let to_push = match escaped {
-                    b'"' => b'"',
-                    b'\\' => b'\\',
-                    b'/' => b'/',
-                    b'b' => 8, // backspace
-                    b'f' => 12, // form feed
-                    b'n' => b'\n',
-                    b'r' => b'\r',
-                    b't' => b'\t',
+                match escaped {
+                    b'"' => buffer.push(b'"'),
+                    b'\\' => buffer.push(b'\\'),
+                    b'/' => buffer.push(b'/'),
+                    b'b' => buffer.push(8),  // backspace
+                    b'f' => buffer.push(12), // form feed
+                    b'n' => buffer.push(b'\n'),
+                    b'r' => buffer.push(b'\r'),
+                    b't' => buffer.push(b'\t'),
                     b'u' => {
-                        self.bytes.next(); // TODO: Handle unicode escapes
-                        self.bytes.next();
-                        self.bytes.next();
-                        self.bytes.next();
-                        b'u'
-                    },
-                    _ => return Err(JsonInputErr::InvalidEscape(escaped))
-                };
+                        let surrogate_offset: u32 = (0xD800 << 10) + 0xDC00 - 0x10000;
 
-                buffer.push(to_push);
+                        let mut codepoint = self.parse_codepoint()? as u32;
+                        if codepoint >= 0xD800 && codepoint <= 0xDFFF {
+                            // first codepoint was the start of a surrogate pair
+                            self.skip_byte(b'\\')?;
+                            self.skip_byte(b'u')?;
+                            let codepoint2 = self.parse_codepoint()? as u32;
+                            codepoint = ((codepoint << 10) + codepoint2) - surrogate_offset;
+                        };
+                        let mut buf = [0u8; 4];
+                        let encoded_bytes = std::char::from_u32(codepoint)
+                            .unwrap_or(std::char::REPLACEMENT_CHARACTER)
+                            .encode_utf8(&mut buf)
+                            .bytes();
+                        for encoded_byte in encoded_bytes {
+                            buffer.push(encoded_byte);
+                        }
+                    }
+                    _ => return Err(JsonInputErr::InvalidEscape(escaped)),
+                };
             } else {
                 buffer.push(byte)
             }
         }
+    }
+
+    // "ab03..." -> 0xab03
+    fn parse_codepoint(&mut self) -> Result<u16, JsonInputErr> {
+        let mut codepoint: u16 = 0;
+        for _ in 0..4 {
+            codepoint <<= 4;
+            let byte2 = self.expect_byte()?;
+            codepoint += match byte2 {
+                b'0'..=b'9' => byte2 - b'0',
+                b'a'..=b'f' => byte2 - b'a' + 10,
+                b'A'..=b'F' => byte2 - b'A' + 10,
+                _ => return Err(JsonInputErr::InvalidEscape(byte2)),
+            } as u16;
+        }
+        Ok(codepoint)
     }
 
     fn match_number(&mut self) -> Result<JsonToken, JsonInputErr> {
@@ -145,7 +173,7 @@ impl<R: Read> JsonLexer<R> {
                     buffer.push(byte);
                     self.bytes.next();
                 }
-                _ => break
+                _ => break,
             }
         }
         // TODO: Actually parse numbers
@@ -174,6 +202,7 @@ impl<R: Read> Iterator for JsonLexer<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jsoninputerr::JsonInputErr;
     use std::fmt::Debug;
 
     #[test]
@@ -184,7 +213,10 @@ mod tests {
 
     #[test]
     fn bare_number() {
-        assert_eq!(tokens_from_str("123"), Ok(vec![JsonToken::Number("123".to_string())]));
+        assert_eq!(
+            tokens_from_str("123"),
+            Ok(vec![JsonToken::Number("123".to_string())])
+        );
     }
 
     #[test]
@@ -217,6 +249,24 @@ mod tests {
         assert_eq!(
             tokens_from_str(r#" "John says \"Hello\"" "#),
             Ok(vec![JsonToken::String(r#"John says "Hello""#.to_string())])
+        );
+    }
+
+    #[test]
+    fn unicode_escapes() {
+        assert_eq!(
+            tokens_from_str(r#" "\u00e6" "#),
+            Ok(vec![JsonToken::String("æ".to_string())])
+        );
+
+        assert_eq!(
+            tokens_from_str(r#" "\uD83D\uDE00" "#),
+            Ok(vec![JsonToken::String("😀".to_string())])
+        );
+
+        assert_eq!(
+            tokens_from_str(r#" "\uD83D" "#),
+            Err(JsonInputErr::InvalidJson)
         );
     }
 
